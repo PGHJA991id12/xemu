@@ -29,7 +29,7 @@ Upstream emulation solutions historically stubbed or bypassed the EP co-processo
 
 ---
 
-## Known Unfixable Issues without Dolby EP Microcode
+## Known Unfixable Issues Without Dolby EP Microcode
 
 **Audio Artifacts & Stream Starvation:** Pre-rendered video tracks and software streams rely on the EP to generate periodic frame interrupts (`0xFFFFC5` Bit 1) to pace audio packet transfers. Without active EP pacing, host-side ring buffers underrun continuously, causing loud clicks, pops, and stuttering.
 
