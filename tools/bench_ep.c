@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2026 Will Bonnett
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
