@@ -88,6 +88,58 @@ static void dsp_c_run(DSPState *dsp, int cycles)
     }
 }
 
+static void dsp_c_bootstrap_ep_firmware(dsp_core_t *core)
+{
+    const char *fw_path = "tools/halo2_dolby.bin";
+    FILE *f = fopen(fw_path, "rb");
+    if (!f) {
+        fw_path = "../tools/halo2_dolby.bin";
+        f = fopen(fw_path, "rb");
+    }
+    if (!f) {
+        fprintf(stderr, "[EP BOOTSTRAP ERROR] Could not open %s\n", "tools/halo2_dolby.bin");
+        return;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    uint32_t total_words = size / 4;
+    uint32_t *buf = g_malloc(size);
+    if (fread(buf, 4, total_words, f) != total_words) {
+        fprintf(stderr, "[EP BOOTSTRAP ERROR] Failed to read firmware payload\n");
+        g_free(buf);
+        fclose(f);
+        return;
+    }
+    fclose(f);
+
+    /* Segmented Dolby Scatter-Loader:
+     * Segment 1: 0xC8 words -> P:0x0000
+     * Segment 2: 0x17F words -> P:0x0180
+     * Tail: remaining words -> P:0x0300
+     */
+    uint32_t seg1_len = 0xC8;
+    uint32_t seg2_len = 0x17F;
+    uint32_t seg3_len = (total_words > (seg1_len + seg2_len)) ? (total_words - seg1_len - seg2_len) : 0;
+
+    for (uint32_t i = 0; i < seg1_len && i < total_words; i++) {
+        core->pram[0x0000 + i] = buf[i] & 0x00FFFFFF;
+    }
+    for (uint32_t i = 0; i < seg2_len && (seg1_len + i) < total_words; i++) {
+        core->pram[0x0180 + i] = buf[seg1_len + i] & 0x00FFFFFF;
+    }
+    for (uint32_t i = 0; i < seg3_len && (seg1_len + seg2_len + i) < total_words; i++) {
+        if ((0x0300 + i) >= DSP_PRAM_SIZE) break;
+        core->pram[0x0300 + i] = buf[seg1_len + seg2_len + i] & 0x00FFFFFF;
+    }
+
+    g_free(buf);
+    fprintf(stderr, "[EP BOOTSTRAP] Successfully loaded %u words from %s | Reset Vector P:0 = 0x%06X\n",
+            total_words, fw_path, core->pram[0]);
+}
+
 static void dsp_c_bootstrap(DSPState *dsp)
 {
     dsp_core_t *core = c_core(dsp);
@@ -102,6 +154,9 @@ static void dsp_c_bootstrap(DSPState *dsp)
                 core->pram[i] &= 0x00ffffff;
             }
         }
+    } else {
+        /* Bootstrap Encoding Processor with genuine Dolby firmware */
+        dsp_c_bootstrap_ep_firmware(core);
     }
     memset(core->pram_opcache, 0, sizeof(core->pram_opcache));
 }
