@@ -24,8 +24,24 @@ Upstream emulation solutions historically stubbed or bypassed the EP co-processo
 * **Peripheral & DMA Emulation**: Implements hardware registers for ESSI0 serial communications (`$FFFFB3`), dynamic host mailbox synchronization (`$FFFFC5`), and internal DMA block transfers (`$FFFFD4`–`$FFFFD6`).
 * **Expanded Memory Addressing**: 32,768 words ($0x8000$) of program RAM (P-RAM) backing the complete 64KB `NV_PAPU_EPPMEM` aperture.
 * **Native SDL3 5.1 Multi-Channel Pipeline**: Replaces legacy stereo-locked SDL audio streams with discrete 6-channel LPCM streaming matching DirectSound3D surround channel topology.
-* **Safe Halting & Graceful Fallback**: Replaces fatal guest memory assertions with virtual core halting. If discrete surround microcode is not present, audio automatically falls back to clean stereo mixing without hangs.
+* **Safe Halting & Graceful Fallback**: Replaces fatal guest memory assertions with virtual core halting. If discrete surround microcode is not present, audio automatically falls back to stereo mixing without hangs.
 * **Standalone Verification Tooling**: Includes `tools/ep_harness`, a self-contained C99 utility to inspect and validate microcode dumps offline.
+
+---
+
+## MANDATORY REQUIREMENTS
+
+* **EEPROM ***must*** be set to Surround and AC-3/Dolby Digital.** Don't bother with DTS. This will not work if EEPROM is set to Stereo
+* **You ***must*** provide your own Dolby AC-3 microcode** (see Firmware Configuration section below)
+* **Real-time DSP Processing ***must*** be enabled and the DSP JIT Engine ***must*** be disabled**
+* **You ***need*** a 5.1 surround system, either from plugging into an AVR with HDMI or using a virtual surround system on Windows.** Good examples of the latter include Creative SBX/CMSS-3D or HeSuVi + EqualizerAPO + VirtualAudioCable. Either way, the Windows Sound Control Panel must be reporting 5.1 discrete speakers. Without it you will be missing entire sound channels!
+---
+
+## Known Unfixable Issues with Stereo Settings
+
+**Audio Artifacts & Stream Starvation:** Pre-rendered video tracks and software streams rely on the EP to generate periodic frame interrupts (`0xFFFFC5` Bit 1) to pace audio packet transfers. Without active EP pacing, host-side ring buffers underrun continuously, causing loud clicks, pops, and stuttering.
+
+**Muddled Channel Separation:** Scraping raw mixbins without an active EP causes front/center channel bleeding, phase cancellation, and a center-biased soundstage. When the guest kernel detects an unbooted EP, DirectSound falls back to an analog 4-to-2 Dolby Pro Logic matrix across Front Left and Front Right.
 
 ---
 
@@ -148,6 +164,14 @@ Because QEMU evaluates hardware audio and NVRAM flags strictly at cold boot, run
 1. **Create Base Profiles**: Boot the Xbox dashboard in Xemu, configure audio to **Stereo**, and shut down. Copy your `eeprom.bin` and rename it `eeprom.bin.stereo`.
 2. **Create Surround Profile**: Boot the dashboard again, change settings to **Dolby Digital Surround**, and shut down. Copy the resulting file to `eeprom.bin.surround`.
 3. **Execution**: When testing multi-channel paths, duplicate `eeprom.bin.surround` as `eeprom.bin`, ensure *Real-time DSP processing* is checked in Xemu settings, and launch.
+
+---
+
+## Roadmap
+1. **Windows Alpha Testing:** Community validation on Windows across various multi-channel DACs, AVRs, and virtual surround headphones.
+2. **Hybrid 2D/3D Bink Video audio streams** are pre-mastered with heavy dynamic range compression peaking directly at 0 dBFS. When those full-scale audio samples are routed through the APU's voice mixer and spatial transform matrices, any positional scaling or multi-voice summing that pushes $v > 1.0\text{f}$ hits that brick-wall clamp. Brick-wall digital clipping converts smooth sine waveforms into square-wave harmonic spikes, which produces high-frequency crackling and popping that vanishes the second the loud audio stream finishes. In the upcoming Beta milestone I'll be implementing a soft saturation knee or applying a -3 dB headroom pad across the multichannel aperture to hopefully resolve this.
+3. **Upstream Architecture Review:** Collaborating with upstream maintainers to integrate EP C-interpreter state cleanly without regressing ongoing JIT milestones.
+4. **macOS / Linux Support:** Deferred until Windows multichannel stability is fully baselined.
 
 ---
 
