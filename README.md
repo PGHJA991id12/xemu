@@ -29,14 +29,6 @@ Upstream emulation solutions historically stubbed or bypassed the EP co-processo
 
 ---
 
-## MANDATORY REQUIREMENTS
-
-* **EEPROM ***must*** be set to Surround and AC-3/Dolby Digital.** Don't bother with DTS. This will not work if EEPROM is set to Stereo
-* **You ***must*** provide your own Dolby AC-3 microcode** (see Firmware Configuration section below)
-* **Real-time DSP Processing ***must*** be enabled and the DSP JIT Engine ***must*** be disabled**
-* **You ***need*** a 5.1 surround system, either from plugging into an AVR with HDMI or using a virtual surround system on Windows.** Good examples of the latter include Creative SBX/CMSS-3D or HeSuVi + EqualizerAPO + VirtualAudioCable. Either way, the Windows Sound Control Panel must be reporting 5.1 discrete speakers. Without it you will be missing entire sound channels!
----
-
 ## Known Unfixable Issues with Stereo Settings
 
 **Audio Artifacts & Stream Starvation:** Pre-rendered video tracks and software streams rely on the EP to generate periodic frame interrupts (`0xFFFFC5` Bit 1) to pace audio packet transfers. Without active EP pacing, host-side ring buffers underrun continuously, causing loud clicks, pops, and stuttering.
