@@ -26,3 +26,7 @@ build.log
 /macos-libs/
 /macos-pkgs/
 /xemu.iconset/
+
+tools/*.bin
+*.bin
+!mcpx_*.bin

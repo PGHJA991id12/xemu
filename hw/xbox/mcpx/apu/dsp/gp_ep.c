@@ -489,7 +489,7 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
         if ((d->monitor.point == MCPX_APU_DEBUG_MON_GP) ||
             (d->monitor.point == MCPX_APU_DEBUG_MON_GP_OR_EP && !ep_enabled)) {
             int off = (d->ep_frame_div % 8) * NUM_SAMPLES_PER_FRAME;
-            if (d->is_5_1_active) {
+            if (d->is_5_1_active && ep_enabled) {
                 /* 5.1 Bypass: Keep QEMU frame_buf silent to prevent overlapping stereo phase issues */
                 for (int i = 0; i < NUM_SAMPLES_PER_FRAME; i++) {
                     d->monitor.frame_buf[off + i][0] = 0;
@@ -556,8 +556,8 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
         }
     }
 
-    /* If 5.1 surround is active, return to prevent legacy stereo stream collision */
-    if (d->is_5_1_active) {
+    /* If 5.1 surround is active and EP is enabled, return to prevent legacy stereo stream collision */
+    if (d->is_5_1_active && ep_enabled) {
         return;
     }
 }

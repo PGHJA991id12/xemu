@@ -191,20 +191,20 @@ static void wav_close(void)
 
 int main(int argc, char *argv[])
 {
-    const char *fw_path = (argc > 1) ? argv[1] : DEFAULT_FW_PATH;
+    const char *fw_file = (argc > 1) ? argv[1] : "tools/dolby_ep.bin";
 
     printf("====================================================\n");
     printf("  XEMU DSP56362 Offline Bench Harness (Phase 52)    \n");
     printf("====================================================\n");
-    printf("[*] Target Firmware: %s\n", fw_path);
+    printf("Loading microcode from: %s\n", fw_file);
 
-    FILE *f = fopen(fw_path, "rb");
-    if (!f && argc <= 1) {
-        fw_path = "tools/halo2_dolby.bin";
-        f = fopen(fw_path, "rb");
+    FILE *f = fopen(fw_file, "rb");
+    if (!f) {
+        fw_file = "tools/halo2_dolby.bin";
+        f = fopen(fw_file, "rb");
     }
     if (!f) {
-        fprintf(stderr, "[-] FATAL: Cannot open firmware file '%s'\n", fw_path);
+        fprintf(stderr, "[-] FATAL: Cannot open firmware file '%s'\n", fw_file);
         return 1;
     }
 

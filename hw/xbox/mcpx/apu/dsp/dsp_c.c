@@ -90,14 +90,27 @@ static void dsp_c_run(DSPState *dsp, int cycles)
 
 static void dsp_c_bootstrap_ep_firmware(dsp_core_t *core)
 {
-    const char *fw_path = "tools/halo2_dolby.bin";
-    FILE *f = fopen(fw_path, "rb");
-    if (!f) {
-        fw_path = "../tools/halo2_dolby.bin";
-        f = fopen(fw_path, "rb");
+    const char *candidates[] = {
+        "dolby_ep.bin",
+        "tools/dolby_ep.bin",
+        "../tools/dolby_ep.bin",
+        "tools/halo2_dolby.bin",
+        NULL
+    };
+
+    FILE *f = NULL;
+    const char *found_path = NULL;
+    for (int i = 0; candidates[i] != NULL; i++) {
+        f = fopen(candidates[i], "rb");
+        if (f) {
+            found_path = candidates[i];
+            break;
+        }
     }
+
     if (!f) {
-        fprintf(stderr, "[EP BOOTSTRAP ERROR] Could not open %s\n", "tools/halo2_dolby.bin");
+        fprintf(stderr, "[EP NOTICE] Discrete 5.1 Dolby microcode (dolby_ep.bin) not found.\n"
+                        "[EP NOTICE] Encoding Processor will remain idle; audio running in standard fallback mode.\n");
         return;
     }
 
@@ -108,18 +121,14 @@ static void dsp_c_bootstrap_ep_firmware(dsp_core_t *core)
     uint32_t total_words = size / 4;
     uint32_t *buf = g_malloc(size);
     if (fread(buf, 4, total_words, f) != total_words) {
-        fprintf(stderr, "[EP BOOTSTRAP ERROR] Failed to read firmware payload\n");
+        fprintf(stderr, "[EP ERROR] Failed to read microcode payload from %s\n", found_path);
         g_free(buf);
         fclose(f);
         return;
     }
     fclose(f);
 
-    /* Segmented Dolby Scatter-Loader:
-     * Segment 1: 0xC8 words -> P:0x0000
-     * Segment 2: 0x17F words -> P:0x0180
-     * Tail: remaining words -> P:0x0300
-     */
+    /* Segmented Dolby Scatter-Loader */
     uint32_t seg1_len = 0xC8;
     uint32_t seg2_len = 0x17F;
     uint32_t seg3_len = (total_words > (seg1_len + seg2_len)) ? (total_words - seg1_len - seg2_len) : 0;
@@ -136,8 +145,8 @@ static void dsp_c_bootstrap_ep_firmware(dsp_core_t *core)
     }
 
     g_free(buf);
-    fprintf(stderr, "[EP BOOTSTRAP] Successfully loaded %u words from %s | Reset Vector P:0 = 0x%06X\n",
-            total_words, fw_path, core->pram[0]);
+    fprintf(stderr, "[EP BOOTSTRAP] Loaded %u words from %s | Reset Vector P:0 = 0x%06X\n",
+            total_words, found_path, core->pram[0]);
 }
 
 static void dsp_c_bootstrap(DSPState *dsp)
