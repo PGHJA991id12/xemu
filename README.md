@@ -175,6 +175,10 @@ Because QEMU evaluates hardware audio and NVRAM flags strictly at cold boot, run
 
 ---
 
+# [AI Disclosure and Project Log](https://github.com/Synkronicity/xemu/blob/master/AI_DISCLOSURE_LOG.md)
+
+---
+
 ## License & Attribution
 
 This project is licensed under the **GNU General Public License v2.0 (GPLv2)** to remain fully compatible with upstream QEMU and Xemu.
