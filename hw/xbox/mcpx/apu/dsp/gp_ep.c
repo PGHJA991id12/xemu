@@ -540,17 +540,25 @@ void mcpx_apu_dsp_frame(MCPXAPUState *d, float mixbins[NUM_MIXBINS][NUM_SAMPLES_
         if (d->ep_frame_div % 8 == 0) {
             dsp_start_frame(d->ep.dsp);
             dsp_set_halt_requested(d->ep.dsp, false);
+            uint64_t start_cycles = dsp_get_cycle_count(d->ep.dsp);
             int ep_loops = 0;
             do {
                 dsp_step(d->ep.dsp);
                 ep_loops++;
                 uint32_t pc = dsp_get_pc(d->ep.dsp);
                 if ((pc == 0x000031 || pc == 0x000032) && !(d->ep.dsp->ep_dma.c5_reg & 0x02)) {
-                    break; /* Frame boundary reached; yield until next frame */
+                    break; /* Frame boundary reached */
                 }
             } while (!dsp_get_halt_requested(d->ep.dsp) && ep_loops < 50000);
-            g_dbg.ep.cycles = dsp_get_cycle_count(d->ep.dsp);
+
+            /* Record delta cycles for this slice instead of lifetime accumulator */
+            g_dbg.ep.cycles = (uint32_t)(dsp_get_cycle_count(d->ep.dsp) - start_cycles);
         }
+    }
+
+    /* If 5.1 surround is active, return to prevent legacy stereo stream collision */
+    if (d->is_5_1_active) {
+        return;
     }
 }
 
