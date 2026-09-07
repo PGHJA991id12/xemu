@@ -1,46 +1,143 @@
-# Xemu MCPX APU Research: 5.1 Surround Sound Extraction Prototype
+# Xemu Motorola DSP56362 (EP) Low-Level Emulation (LLE) Audio Subsystem
 
-> **Status:** Active Research / Experimental Prototype (Target: Windows / MSYS2 MinGW-w64)  
-> **Scope:** Exploring native multi-channel LPCM extraction from the Nvidia MCPX Audio Processing Unit (APU).
+[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](file:///z:/xemu/LICENSE.txt)
+[![Architecture: Original Xbox MCPX APU](https://img.shields.io/badge/Hardware-MCPX%20APU%20DSP56362-green.svg)](#system-architecture)
+[![Audio Backend: SDL3 5.1 Multi-Channel](https://img.shields.io/badge/Audio-SDL3%205.1%20Surround-orange.svg)](#audio-channel-ordering)
 
-This repository serves as an open technical log and architectural sandbox documenting an attempt to bypass QEMU's locked 2-channel audio abstraction in Xemu. Rather than presenting a polished consumer release, this fork tracks the incremental engineering steps, hypotheses, false starts, and architectural dead ends encountered while trying to expose the Xbox's native 6-channel spatial audio matrix.
-
----
-
-## Architectural Evolution & Branching Strategy
-
-This project evolved through two distinct structural approaches to handling the emulated MCPX APU output:
-
-1. **`feature/dual-audio-pipeline` (The Air-Gapped Baseline):**  
-   Utilizes a decoupled secondary SDL3 stream alongside Xemu's core monitor. This approach isolates the experimental 6-channel payload from QEMU's hardcoded stereo throttle timer, avoiding hard hypervisor deadlocks at the cost of independent stream pacing.
-2. **`master` (Native Elastic Routing Foundation):**  
-   Explores direct integration into Xemu's native audio buffer manifolds. While it achieves tighter architectural alignment, it surfaces deep clock-sync and resampling limits within the underlying `libsamplerate` and APU cycle-timing contracts.
+A bit-accurate Low-Level Emulation (LLE) implementation of the **Motorola DSP56362 Encoding Processor (EP)** co-processor for the [Xemu](https://xemu.app) Original Xbox emulator. This subsystem restores authentic hardware-accelerated Dolby Digital AC-3 interactive surround sound processing.
 
 ---
 
-## Background: The Xbox Audio Stack & The Sensaura Wall
+## Overview
 
-The original Xbox audio architecture relies on the Nvidia MCPX (an nForce 1 derivative) paired with a Motorola DSP56300-based Global Processor (GP) and Encode Processor (EP). Hardware 3D spatialization was driven by Sensaura EnvironmentalFX, applying Transaural Cross-Talk Cancellation (CTC) filters designed to fold multi-channel environments down to physical stereo television speakers or headphones with supported games (like Doom 3).
+The original Xbox MCPX Audio Processing Unit (APU) contains two independent digital signal processing cores based on the Motorola DSP56300 family:
+1. **Global Processor (GP)**: Responsible for voice summation, environmental reverberation, dynamic range compression, and front stereo mixing.
+2. **Encode Processor (EP) - Motorola DSP56362**: A dedicated hardware co-processor responsible for discrete 5.1 multi-channel spatialization and interactive Dolby Digital AC-3 encoding.
 
-When configuring Xemu for 5.1 Surround via a Dolby Digital-enabled EEPROM, the guest Xbox kernel expects to execute a binary microcode handshake with the hardware Encode Processor. 
-
-### Key Findings & Limitations
-* **The Experimental DSP Boundary:** Upstream Xemu includes a port of the open-source DSP56300 C-interpreter. While functional for basic environmental effects, it lacks a complete HLE state machine or microcode implementation for the full interactive Dolby Digital encoder. 
-* **The Handshake Stall:** Without an emulated response to specific mailbox register states (such as the `0xa018` polling loop), the guest kernel falls back to stereo downmixing via Sensaura, leaving unused mixbins to capture incomplete or phase-shifted data.
-* **Clock Sync & Buffer Starvation:** Direct buffer injection without matching stride sizing in host resampling layers introduces micro-discontinuities (voltage tears), resulting in rhythmic digital crackling during variable-framerate sequences.
+Upstream emulation solutions historically stubbed or bypassed the EP co-processor due to missing instruction extensions, strict peripheral handshaking requirements, and lack of internal DMA emulation. This subsystem introduces a full execution interpreter, hardware peripheral register emulation, host mailbox synchronization, and seamless SDL3 5.1 audio streaming.
 
 ---
 
-## The Mixbin Routing Matrix
+## Key Features
 
-When analyzing the Global Processor's post-processing accumulator arrays (`mixbins`), the hardware maps internal spatial channels as follows:
+* **Authentic Motorola DSP56362 Execution**: Emulates 24-bit DSP56300 instruction extensions, including `EXTRACTU` (unsigned bitfield extraction) and `DO FOREVER` hardware looping.
+* **Peripheral & DMA Emulation**: Implements hardware registers for ESSI0 serial communications (`$FFFFB3`), dynamic host mailbox synchronization (`$FFFFC5`), and internal DMA block transfers (`$FFFFD4`–`$FFFFD6`).
+* **Expanded Memory Addressing**: 32,768 words ($0x8000$) of program RAM (P-RAM) backing the complete 64KB `NV_PAPU_EPPMEM` aperture.
+* **Native SDL3 5.1 Multi-Channel Pipeline**: Replaces legacy stereo-locked SDL audio streams with discrete 6-channel LPCM streaming matching DirectSound3D surround channel topology.
+* **Safe Halting & Graceful Fallback**: Replaces fatal guest memory assertions with virtual core halting. If discrete surround microcode is not present, audio automatically falls back to clean stereo mixing without hangs.
+* **Standalone Verification Tooling**: Includes `tools/ep_harness`, a self-contained C99 utility to inspect and validate microcode dumps offline.
 
-* `Mixbin[0]` $\rightarrow$ Front Left
-* `Mixbin[1]` $\rightarrow$ Front Right
-* `Mixbin[2]` $\rightarrow$ Center
-* `Mixbin[3]` $\rightarrow$ LFE (Subwoofer)
-* `Mixbin[4]` $\rightarrow$ Surround Left
-* `Mixbin[5]` $\rightarrow$ Surround Right
+---
+
+## System Architecture
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        Xemu MCPX APU Subsystem                         │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+    ┌───────────────────────────────┴───────────────────────────────┐
+    ▼                                                               ▼
+┌───────────────────────┐                               ┌───────────────────────┐
+│  Voice Processor (VP) │                               │ Global Processor (GP) │
+│  64 3D Voices + HRTF  ├───────────── Mixbins 0..5 ───►│ Master Effects & Mix  │
+└───────────────────────┘                               └───────────┬───────────┘
+                                                                    │
+                                                  Multichannel DMA Stride ($004000)
+                                                                    │
+                                                                    ▼
+                                                        ┌───────────────────────┐
+                                                        │  Encode Processor     │
+                                                        │  (EP / Motorola       │
+                                                        │   DSP56362 LLE)       │
+                                                        └───────────┬───────────┘
+                                                                    │
+                                                  Discrete 5.1 LPCM (L, R, C, LFE, LS, RS)
+                                                                    │
+                                                                    ▼
+                                                        ┌───────────────────────┐
+                                                        │    SDL3 AudioStream   │
+                                                        │  (WASAPI / Direct)    │
+                                                        └───────────────────────┘
+```
+
+---
+
+## Building
+
+### Prerequisites
+
+* **Operating System**: Windows 10/11 (64-bit)
+* **Build Environment**: [MSYS2](https://www.msys2.org/) with the `MINGW64` toolchain
+* **Build System**: Meson and Ninja
+
+### Full Emulator Build
+
+Launch the **MSYS2 MINGW64** shell and execute:
+
+```bash
+cd /z/xemu
+./build.sh
+```
+
+*(For incremental development builds: `ninja -C build`)*
+
+The compiled binary will be generated at `./dist/xemu.exe`.
+
+### Standalone Microcode Verification Harness Build
+
+To compile the standalone verification utility without building the entire emulator:
+
+```bash
+gcc -O2 -s -o tools/ep_harness tools/bench_ep.c
+```
+
+---
+
+## Firmware Configuration
+
+Due to licensing restrictions, proprietary Dolby Digital microcode cannot be distributed with Xemu. While many titles upload this microcode dynamically into guest memory during execution, you can provide an offline firmware dump to ensure multi-channel surround encoding across all titles:
+
+1. Obtain a clean 32-bit LE microcode dump from your authentic hardware or software title.
+2. Rename the file to `dolby_ep.bin`.
+3. Place `dolby_ep.bin` in the root emulator directory or in the `tools/` directory:
+   * `./dolby_ep.bin`
+   * `./tools/dolby_ep.bin`
+
+### Validating Your Firmware Dump
+
+Run the standalone verification utility to verify the file topology and hardware reset vector:
+
+```bash
+./tools/ep_harness tools/dolby_ep.bin
+```
+
+**Expected Output for Authentic Microcode**:
+```text
+Motorola DSP56362 Microcode Verification Utility
+[+] Successfully loaded 3804 bytes (951 24-bit words) from: tools/dolby_ep.bin
+[+] Firmware Topology Analysis:
+    |- Vector Table Length : 0x00C8 words (Destination: P:0x0000)
+    |- Transform Kernel    : 0x017F words (Destination: P:0x0180)
+    \- Data Tables / Tail  : 0x01AE words (Destination: P:0x0300)
+[+] Hardware Reset Vector : 0x050C08
+[+] Status: Validated authentic Xbox Dolby Digital AC-3 interactive encoding microcode.
+```
+
+---
+
+## Audio Channel Ordering
+
+The internal monitor stream outputs audio in standard discrete DirectSound 5.1 surround ordering:
+
+| Index | Channel Identifier | Speaker Destination |
+| :---: | :--- | :--- |
+| **0** | Front Left (`FL`) | Left Front Satellite |
+| **1** | Front Right (`FR`) | Right Front Satellite |
+| **2** | Center (`FC`) | Center Dialogue Channel |
+| **3** | Low-Frequency Effects (`LFE`) | Subwoofer |
+| **4** | Surround Left (`SL`) | Left Rear Surround |
+| **5** | Surround Right (`SR`) | Right Rear Surround |
 
 ---
 
@@ -48,20 +145,16 @@ When analyzing the Global Processor's post-processing accumulator arrays (`mixbi
 
 Because QEMU evaluates hardware audio and NVRAM flags strictly at cold boot, runtime toggling of surround states is unsupported by the guest OS. Testing requires maintaining dual EEPROM profiles:
 
-1. **Create Base Profiles:** Boot the Xbox dashboard in Xemu, configure audio to **Stereo**, and shut down. Copy your `eeprom.bin` and rename it `eeprom.bin.stereo`.
-2. **Create Surround Profile:** Boot the dashboard again, change settings to **Dolby Digital Surround**, and shut down. Copy the resulting file to `eeprom.bin.surround`.
-3. **Execution:** When testing multi-channel paths, duplicate `eeprom.bin.surround` as `eeprom.bin`, ensure *Real-time DSP processing* is checked in Xemu settings, and launch.
+1. **Create Base Profiles**: Boot the Xbox dashboard in Xemu, configure audio to **Stereo**, and shut down. Copy your `eeprom.bin` and rename it `eeprom.bin.stereo`.
+2. **Create Surround Profile**: Boot the dashboard again, change settings to **Dolby Digital Surround**, and shut down. Copy the resulting file to `eeprom.bin.surround`.
+3. **Execution**: When testing multi-channel paths, duplicate `eeprom.bin.surround` as `eeprom.bin`, ensure *Real-time DSP processing* is checked in Xemu settings, and launch.
 
 ---
 
-## Chronology of Abandoned Approaches
+## License & Attribution
 
-* **OpenAL Soft DirectSound3D HLE Integration:** Early iterations attempted an external OpenAL dependency to intercept DirectSound3D coordinates and scrape APU ring buffers. This path was permanently excised due to hypervisor thread deadlocks, external dependency bloat, and severe state desynchronization.
-* **Raw 1:1 Integer Scaling:** Removing amplitude headroom padding proved that persistent noise floors are not simple digital clipping (`0dBFS` overflows), but rather structural phase anomalies and frame-timing pacing discrepancies between host audio callbacks and emulated CPU schedules.
+This project is licensed under the **GNU General Public License v2.0 (GPLv2)** to remain fully compatible with upstream QEMU and Xemu.
 
----
-
-## Environment & Toolchain
-
-* **Target OS:** Windows 10 / 11 (64-bit)
-* **Build Environment:** MSYS2 MinGW-w64 toolchain (`./build.sh`)
+* **Motorola DSP56362 LLE Architecture & Reintegration**: Copyright (c) 2026 Will Bonnett
+* **Xemu APU / Emulator Core**: Copyright (c) 2020-2025 Matt Borgerson, espes, and Xemu contributors
+* **Hatari / ARAnyM DSP Engine Basis**: Copyright (c) 2001-2008 ARAnyM developer team, Thomas Huth
